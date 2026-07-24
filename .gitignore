@@ -1,0 +1,68 @@
+# --- Runtime data пользователя (не часть кода) ---
+data/*
+!data/.gitkeep
+!data/backups/.gitkeep
+!data/cache/.gitkeep
+!data/imports/.gitkeep
+!data/documents/.gitkeep
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# --- Виртуальные окружения ---
+.venv/
+venv/
+env/
+ENV/
+
+# --- Тесты / покрытие ---
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# --- Линтеры / тайпчекеры ---
+.mypy_cache/
+.ruff_cache/
+
+# --- IDE ---
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# --- PyInstaller / упаковка ---
+packaging/build/
+packaging/dist/
+*.spec.bak
+*.manifest
+
+# --- Логи ---
+*.log
+logs/
+
+# --- SQLite (на случай, если БД случайно окажется вне data/) ---
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
+
+# --- OS ---
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# --- Секреты/локальные настройки ---
+.env
+*.local.json
