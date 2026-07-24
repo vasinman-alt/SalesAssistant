@@ -1,3 +1,4 @@
+
 # -*- coding: utf-8 -*-
 """
 Пакет sales_assistant.ui.panels.company_card.
@@ -13,9 +14,9 @@ from PySide6.QtWidgets import (
     QListWidgetItem, QTabWidget, QPushButton, QHBoxLayout, QMessageBox,
     QDialog, QLineEdit, QTextEdit, QComboBox, QDateTimeEdit, QDialogButtonBox,
     QFileDialog, QTreeWidget, QTreeWidgetItem, QHeaderView, QMenu,
-    QAbstractItemView, QCheckBox
+    QAbstractItemView, QCheckBox, QInputDialog
 )
-from PySide6.QtCore import Qt, QDateTime, QUrl
+from PySide6.QtCore import Qt, QDateTime, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 
 from sales_assistant.db.engine import SessionLocal
@@ -27,6 +28,8 @@ from sales_assistant.services.document_service import DocumentService
 
 
 class CompanyCardWidget(QWidget):
+    file_preview_requested = Signal(str)
+
     def __init__(self, current_user_id: uuid.UUID, parent=None):
         super().__init__(parent)
         self.current_user_id = current_user_id
@@ -44,7 +47,7 @@ class CompanyCardWidget(QWidget):
 
         self.tabs = QTabWidget()
 
-        # ==================== Вкладка 1: Общая информация ====================
+        # Вкладка 1: Общая информация
         info_tab = QWidget()
         info_layout = QVBoxLayout(info_tab)
 
@@ -74,7 +77,7 @@ class CompanyCardWidget(QWidget):
 
         self.tabs.addTab(info_tab, "Общее")
 
-        # ==================== Вкладка 2: История ====================
+        # Вкладка 2: История
         history_tab = QWidget()
         history_layout = QVBoxLayout(history_tab)
         btn_add_interaction = QPushButton("+ Добавить взаимодействие")
@@ -85,7 +88,7 @@ class CompanyCardWidget(QWidget):
         history_layout.addWidget(self.history_list)
         self.tabs.addTab(history_tab, "История")
 
-        # ==================== Вкладка 3: Задачи ====================
+        # Вкладка 3: Задачи
         tasks_tab = QWidget()
         tasks_layout = QVBoxLayout(tasks_tab)
         btn_add_task = QPushButton("+ Добавить задачу")
@@ -96,7 +99,7 @@ class CompanyCardWidget(QWidget):
         tasks_layout.addWidget(self.tasks_list)
         self.tabs.addTab(tasks_tab, "Задачи")
 
-        # ==================== Вкладка 4: Документы ====================
+        # Вкладка 4: Документы
         docs_tab = QWidget()
         docs_layout = QVBoxLayout(docs_tab)
         btn_add_doc = QPushButton("+ Добавить документ")
@@ -104,18 +107,22 @@ class CompanyCardWidget(QWidget):
         docs_layout.addWidget(btn_add_doc)
 
         self.docs_tree = QTreeWidget()
-        self.docs_tree.setColumnCount(4)
-        self.docs_tree.setHeaderLabels(["Имя файла", "Размер", "Дата создания", "Дата изменения"])
+        self.docs_tree.setColumnCount(5)
+        self.docs_tree.setHeaderLabels(["Имя файла", "Комментарий", "Размер", "Дата создания", "Дата изменения"])
         self.docs_tree.setAlternatingRowColors(True)
         self.docs_tree.setSelectionMode(QAbstractItemView.SingleSelection)
         self.docs_tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.docs_tree.customContextMenuRequested.connect(self._on_doc_context_menu)
-        self.docs_tree.itemDoubleClicked.connect(self._open_document)
+        self.docs_tree.itemClicked.connect(self._on_doc_single_click)
+        self.docs_tree.itemDoubleClicked.connect(self._on_doc_double_clicked)
+
         header = self.docs_tree.header()
         header.setStretchLastSection(True)
         header.setSectionResizeMode(0, QHeaderView.Stretch)
-        for i in range(1, 4):
-            header.setSectionResizeMode(i, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
 
         docs_layout.addWidget(self.docs_tree)
         self.tabs.addTab(docs_tab, "Документы")
@@ -134,7 +141,6 @@ class CompanyCardWidget(QWidget):
                     self._clear()
                     return
 
-                # Основная информация
                 self.lbl_name.setText(company.name)
                 self.lbl_inn.setText(company.inn or "")
                 self.lbl_region.setText(company.region.name if company.region else "")
@@ -142,7 +148,6 @@ class CompanyCardWidget(QWidget):
                 self.lbl_website.setText(company.website or "")
                 self.lbl_comment.setText(company.comment or "")
 
-                # Контакты
                 contacts = self.contact_service.get_by_company(session, company_id)
                 self.contacts_list.clear()
                 for c in contacts:
@@ -150,7 +155,6 @@ class CompanyCardWidget(QWidget):
                     item = QListWidgetItem(item_text)
                     self.contacts_list.addItem(item)
 
-                # История
                 interactions = self.interaction_service.get_by_company(session, company_id)
                 self.history_list.clear()
                 for i in interactions:
@@ -159,7 +163,6 @@ class CompanyCardWidget(QWidget):
                     item.setData(Qt.UserRole, i.id)
                     self.history_list.addItem(item)
 
-                # Задачи
                 tasks = self.task_service.get_by_company(session, company_id)
                 self.tasks_list.clear()
                 for t in tasks:
@@ -169,7 +172,6 @@ class CompanyCardWidget(QWidget):
                     item.setData(Qt.UserRole, t.id)
                     self.tasks_list.addItem(item)
 
-                # Документы
                 docs = self.document_service.get_by_entity(session, "company", company_id)
                 self.docs_tree.clear()
                 for d in docs:
@@ -184,11 +186,13 @@ class CompanyCardWidget(QWidget):
 
                     item = QTreeWidgetItem([
                         d.original_name,
+                        d.comment or "",
                         size_str,
                         ctime_str,
                         mtime_str
                     ])
-                    item.setData(0, Qt.UserRole, file_path)
+                    item.setData(0, Qt.UserRole, file_path)          # путь к файлу
+                    item.setData(0, Qt.UserRole + 1, d.id)           # id документа для удаления/редактирования
                     if not exists:
                         item.setForeground(0, Qt.gray)
                         item.setToolTip(0, "Файл не найден по указанному пути")
@@ -266,7 +270,6 @@ class CompanyCardWidget(QWidget):
         interaction_id = item.data(Qt.UserRole)
         if not interaction_id:
             return
-        # В будущем — полноценный диалог просмотра/редактирования
         QMessageBox.information(self, "Просмотр", f"Детали взаимодействия id={interaction_id} (заглушка)")
 
     def _add_task_dialog(self):
@@ -345,6 +348,12 @@ class CompanyCardWidget(QWidget):
         if not file_path:
             return
         original_name = os.path.basename(file_path)
+
+        # Запросим комментарий (опционально)
+        comment, ok = QInputDialog.getText(self, "Комментарий к документу", "Введите краткое описание (необязательно):")
+        if not ok:
+            comment = ""  # если нажали Cancel, всё равно добавляем без комментария
+
         with SessionLocal() as session:
             try:
                 self.document_service.attach_to_entity(
@@ -354,6 +363,7 @@ class CompanyCardWidget(QWidget):
                     doc_type="other",
                     entity_type="company",
                     entity_id=self.company_id,
+                    comment=comment if comment.strip() else None,
                 )
                 session.commit()
                 self.load_company(self.company_id)
@@ -363,6 +373,17 @@ class CompanyCardWidget(QWidget):
     # --------------------------------------------------------------
     # Работа с файлами документов
     # --------------------------------------------------------------
+    def _on_doc_single_click(self, item: QTreeWidgetItem, column: int):
+        file_path = item.data(0, Qt.UserRole)
+        if file_path:
+            self.file_preview_requested.emit(file_path)
+
+    def _on_doc_double_clicked(self, item: QTreeWidgetItem, column: int):
+        if column == 1:  # колонка комментария
+            self._edit_comment(item)
+        else:
+            self._open_document(item)
+
     def _open_document(self, item: QTreeWidgetItem):
         file_path = item.data(0, Qt.UserRole)
         if file_path and os.path.exists(file_path):
@@ -370,14 +391,32 @@ class CompanyCardWidget(QWidget):
         else:
             QMessageBox.warning(self, "Ошибка", "Файл не найден.")
 
+    def _edit_comment(self, item: QTreeWidgetItem):
+        doc_id = item.data(0, Qt.UserRole + 1)
+        if not doc_id:
+            return
+        current_comment = item.text(1)  # вторая колонка
+        new_comment, ok = QInputDialog.getText(self, "Комментарий", "Введите комментарий:", text=current_comment)
+        if ok:
+            with SessionLocal() as session:
+                try:
+                    self.document_service.update_comment(session, doc_id, new_comment)
+                    session.commit()
+                    item.setText(1, new_comment)
+                except Exception as e:
+                    QMessageBox.critical(self, "Ошибка", str(e))
+
     def _on_doc_context_menu(self, pos):
         item = self.docs_tree.itemAt(pos)
         if not item:
             return
         file_path = item.data(0, Qt.UserRole)
+        doc_id = item.data(0, Qt.UserRole + 1)
         menu = QMenu(self)
         open_action = menu.addAction("Открыть")
         open_folder_action = menu.addAction("Показать в папке")
+        edit_comment_action = menu.addAction("Изменить комментарий")
+        delete_action = menu.addAction("Удалить")
         action = menu.exec(self.docs_tree.mapToGlobal(pos))
         if action == open_action:
             self._open_document(item)
@@ -385,3 +424,29 @@ class CompanyCardWidget(QWidget):
             folder = os.path.dirname(file_path)
             if os.path.exists(folder):
                 QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
+        elif action == edit_comment_action:
+            self._edit_comment(item)
+        elif action == delete_action:
+            self._delete_document(doc_id, file_path)
+
+    def _delete_document(self, doc_id, file_path):
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Удаление документа")
+        msg.setText("Что вы хотите удалить?")
+        btn_delete_record = msg.addButton("Только запись в БД", QMessageBox.AcceptRole)
+        btn_delete_with_file = msg.addButton("Запись и файл на диске", QMessageBox.DestructiveRole)
+        btn_cancel = msg.addButton("Отмена", QMessageBox.RejectRole)
+        msg.exec()
+        if msg.clickedButton() == btn_cancel:
+            return
+        delete_file = (msg.clickedButton() == btn_delete_with_file)
+
+        with SessionLocal() as session:
+            try:
+                self.document_service.remove(session, doc_id, delete_file=delete_file)
+                session.commit()
+                self.load_company(self.company_id)
+                # Очистить панель предпросмотра
+                self.file_preview_requested.emit("")
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка", f"Не удалось удалить документ:\n{e}")

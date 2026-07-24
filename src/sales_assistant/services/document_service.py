@@ -5,6 +5,7 @@
 Сервис для работы с документами.
 """
 import uuid
+import os
 from datetime import datetime, timezone
 from typing import List, Optional
 from sqlalchemy.orm import Session
@@ -18,7 +19,6 @@ class DocumentService:
         self.repo = DocumentRepository()
 
     def get_by_entity(self, session: Session, entity_type: str, entity_id: uuid.UUID) -> List[Document]:
-        """Получить документы, привязанные к сущности (компании, контакту и т.д.)."""
         return (
             session.query(Document)
             .join(DocumentLink)
@@ -37,13 +37,14 @@ class DocumentService:
         doc_type: str,
         entity_type: str,
         entity_id: uuid.UUID,
+        comment: Optional[str] = None,
     ) -> Document:
-        """Добавить документ и привязать к сущности."""
         doc = Document(
             id=uuid.uuid4(),
             file_path=file_path,
             original_name=original_name,
             doc_type=doc_type,
+            comment=comment,
             uploaded_at=datetime.now(timezone.utc),
             uploaded_by=self.current_user_id,
             origin_node=uuid.uuid4(),
@@ -57,4 +58,26 @@ class DocumentService:
             entity_id=entity_id,
         )
         session.add(link)
+        return doc
+
+    def remove(self, session: Session, document_id: uuid.UUID, delete_file: bool = False) -> bool:
+        doc = session.get(Document, document_id)
+        if not doc:
+            return False
+        session.query(DocumentLink).filter(DocumentLink.document_id == document_id).delete()
+        session.delete(doc)
+        if delete_file:
+            try:
+                if os.path.exists(doc.file_path):
+                    os.remove(doc.file_path)
+            except Exception:
+                pass
+        session.flush()
+        return True
+
+    def update_comment(self, session: Session, document_id: uuid.UUID, comment: str) -> Optional[Document]:
+        doc = session.get(Document, document_id)
+        if doc:
+            doc.comment = comment
+            session.flush()
         return doc
