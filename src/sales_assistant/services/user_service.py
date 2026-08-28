@@ -7,34 +7,32 @@
 """
 import uuid
 from sqlalchemy.orm import Session
-
 from sales_assistant.db.engine import SessionLocal
 from sales_assistant.db.models.user import User, Role, UserRole
 
 
 class UserService:
     @staticmethod
-    def ensure_local_admin() -> User:
+    def ensure_local_admin() -> uuid.UUID:
         """
         Убеждается, что в базе существует локальный пользователь-владелец.
-        Если нет — создаёт пользователя, роль 'owner' и связь user_role.
-        Возвращает объект User.
+        Возвращает UUID пользователя.
         """
         session = SessionLocal()
         try:
-            # Проверим, есть ли уже локальный пользователь
-            existing_user = session.query(User).filter(User.is_local == True).first()
-            if existing_user:
-                return existing_user
+            # Проверяем, существует ли уже локальный пользователь
+            user = session.query(User).filter(User.is_local == True).first()
+            if user:
+                return user.id
 
-            # 1. Создаём роль owner, если её нет
+            # Создаём роль owner, если её нет
             owner_role = session.query(Role).filter(Role.name == "owner").first()
             if not owner_role:
                 owner_role = Role(id=uuid.uuid4(), name="owner")
                 session.add(owner_role)
-                session.flush()  # чтобы получить id
+                session.flush()
 
-            # 2. Создаём пользователя
+            # Создаём пользователя
             local_user = User(
                 id=uuid.uuid4(),
                 username="local_admin",
@@ -42,14 +40,14 @@ class UserService:
                 is_local=True,
             )
             session.add(local_user)
-            session.flush()  # чтобы получить id
+            session.flush()
 
-            # 3. Связываем пользователя с ролью
+            # Связываем с ролью
             user_role = UserRole(user_id=local_user.id, role_id=owner_role.id)
             session.add(user_role)
 
             session.commit()
-            return local_user
+            return local_user.id
         except Exception:
             session.rollback()
             raise

@@ -19,6 +19,8 @@ from sales_assistant.services.user_service import UserService
 from sales_assistant.services.company_service import CompanyService
 from sales_assistant.ui.panels.navigation_panel import NavigationPanel
 from sales_assistant.ui.panels.company_card import CompanyCardWidget
+from sales_assistant.ui.dialogs.search_dialog import SearchDialog
+from sales_assistant.ui.utils.dialogs import show_error_message
 
 
 class MainWindow(QMainWindow):
@@ -27,13 +29,11 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Sales Assistant")
         self.resize(1200, 800)
 
-        self.current_user = UserService.ensure_local_admin()
-        self.current_user_id = self.current_user.id
-
+        self.current_user_id = UserService.ensure_local_admin()
         self._setup_ui()
 
     def _setup_ui(self):
-        # Центральный стек
+        # Центральный стек: приветствие / карточка компании
         self.central_stack = QStackedWidget()
         welcome_widget = QLabel("Выберите компанию из списка или добавьте новую")
         welcome_widget.setAlignment(Qt.AlignCenter)
@@ -44,17 +44,19 @@ class MainWindow(QMainWindow):
         self.central_stack.addWidget(self.company_card)
         self.setCentralWidget(self.central_stack)
 
-        # Левая панель навигации
+        # Левая док-панель: навигация
         nav_panel = NavigationPanel(self.current_user_id)
         nav_panel.company_selected.connect(self._show_company)
         nav_panel.add_company_requested.connect(self._add_company_dialog)
+        nav_panel.search_requested.connect(self._open_search_dialog)
+
         nav_dock = QDockWidget("Навигация", self)
         nav_dock.setObjectName("NavigationDock")
         nav_dock.setWidget(nav_panel)
         nav_dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
         self.addDockWidget(Qt.LeftDockWidgetArea, nav_dock)
 
-        # Правая панель предпросмотра
+        # Правая док-панель: предпросмотр файлов
         self.preview_dock = QDockWidget("Просмотр файла", self)
         self.preview_dock.setObjectName("PreviewDock")
         self.preview_dock.setAllowedAreas(Qt.RightDockWidgetArea | Qt.LeftDockWidgetArea)
@@ -132,7 +134,7 @@ class MainWindow(QMainWindow):
         self.preview_dock.hide()
         self.addDockWidget(Qt.RightDockWidgetArea, self.preview_dock)
 
-        # Внутренние переменные
+        # Внутренние переменные для предпросмотра
         self.current_preview_file = None
         self._pdf_doc = None
         self._pdf_page_count = 0
@@ -190,6 +192,10 @@ class MainWindow(QMainWindow):
 
         elif ext in office_exts:
             self._load_office_text(file_path)
+            self._hide_pdf_controls()
+
+        elif ext == '.eml':
+            self._load_eml(file_path)
             self._hide_pdf_controls()
 
         else:
@@ -255,22 +261,68 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self._show_unsupported(f"Ошибка чтения документа:\n{e}")
 
+    def _load_eml(self, file_path: str):
+        import email
+        from email import policy
+        from email.parser import BytesParser
+        with open(file_path, 'rb') as f:
+            msg = BytesParser(policy=policy.default).parse(f)
+
+        subject = msg.get('Subject', '(без темы)')
+        from_ = msg.get('From', '(неизвестно)')
+        date = msg.get('Date', '')
+
+        html_body = None
+        plain_body = None
+        if msg.is_multipart():
+            for part in msg.walk():
+                ctype = part.get_content_type()
+                if ctype == 'text/html' and not html_body:
+                    try:
+                        html_body = part.get_content()
+                    except:
+                        pass
+                elif ctype == 'text/plain' and not plain_body:
+                    try:
+                        plain_body = part.get_content()
+                    except:
+                        pass
+        else:
+            payload = msg.get_content()
+            if msg.get_content_type() == 'text/html':
+                html_body = payload
+            else:
+                plain_body = payload
+
+        header_html = f"""
+        <html><body style='font-family:Segoe UI; font-size:11pt;'>
+        <h2>{subject}</h2>
+        <p><b>От:</b> {from_}</p>
+        <p><b>Дата:</b> {date}</p>
+        <hr>
+        """
+        if html_body:
+            content = html_body
+        elif plain_body:
+            content = f"<pre>{plain_body}</pre>"
+        else:
+            content = "<p>(сообщение не содержит текста)</p>"
+
+        full_html = header_html + content + "</body></html>"
+        self.text_preview.setHtml(full_html)
+        self.preview_stack.setCurrentIndex(1)
+
     def _docx_to_html(self, file_path: str) -> str:
-        """Преобразует DOCX в HTML с базовым форматированием."""
         import docx
         doc = docx.Document(file_path)
         html_parts = ["<html><body style='font-size:12pt; font-family:Segoe UI;'>"]
-
         for para in doc.paragraphs:
-            # Определяем стиль параграфа
             if para.style.name.startswith('Heading'):
                 level = para.style.name.split()[-1]
                 tag = f"h{level}"
                 html_parts.append(f"<{tag}>")
             else:
                 html_parts.append("<p>")
-
-            # Проходим по runs внутри параграфа
             for run in para.runs:
                 text = run.text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
                 if run.bold:
@@ -281,28 +333,21 @@ class MainWindow(QMainWindow):
                     text = f"<u>{text}</u>"
                 html_parts.append(text)
             html_parts.append(f"</{tag if para.style.name.startswith('Heading') else 'p'}>")
-
         html_parts.append("</body></html>")
         return '\n'.join(html_parts)
 
     def _xlsx_to_html(self, file_path: str) -> str:
-        """Преобразует XLSX в HTML-таблицу."""
         import openpyxl
-        from openpyxl.utils import get_column_letter
-
         wb = openpyxl.load_workbook(file_path, data_only=True)
         html_parts = ["<html><body style='font-size:11pt; font-family:Segoe UI;'>"]
-
         for sheet_name in wb.sheetnames:
             ws = wb[sheet_name]
             html_parts.append(f"<h3>{sheet_name}</h3>")
             html_parts.append("<table border='1' cellpadding='4' cellspacing='0' style='border-collapse: collapse; width: 100%;'>")
-
             for row in ws.iter_rows():
                 html_parts.append("<tr>")
                 for cell in row:
                     value = str(cell.value) if cell.value is not None else ''
-                    # Можно добавить жирность для первой строки, если захотим
                     if cell.row == 1:
                         html_parts.append(f"<td style='font-weight: bold; background-color: #f0f0f0;'>{value}</td>")
                     else:
@@ -313,11 +358,9 @@ class MainWindow(QMainWindow):
         return '\n'.join(html_parts)
 
     def _pptx_to_html(self, file_path: str) -> str:
-        """Преобразует PPTX в HTML, группируя текст по слайдам."""
         import pptx
         prs = pptx.Presentation(file_path)
         html_parts = ["<html><body style='font-size:12pt; font-family:Segoe UI;'>"]
-
         for slide_num, slide in enumerate(prs.slides, start=1):
             html_parts.append(f"<h2>Слайд {slide_num}</h2>")
             for shape in slide.shapes:
@@ -339,7 +382,6 @@ class MainWindow(QMainWindow):
         return '\n'.join(html_parts)
 
     def _odf_to_text(self, file_path: str, ext: str) -> str:
-        """Извлекает plain text из ODF-документов."""
         import odf.opendocument as od
         if ext == '.odt':
             from odf import text as odf_text
@@ -444,6 +486,18 @@ class MainWindow(QMainWindow):
             self._render_image_at_zoom()
 
     # --------------------------------------------------------------
+    # Диалог поиска
+    # --------------------------------------------------------------
+    def _open_search_dialog(self):
+        dialog = SearchDialog(self.current_user_id, self)
+        # После создания компании обновляем список в навигации
+        nav_dock = self.findChild(QDockWidget, "NavigationDock")
+        if nav_dock:
+            nav_panel = nav_dock.widget()
+            dialog.company_created.connect(lambda: nav_panel._load_companies())
+        dialog.exec()
+
+    # --------------------------------------------------------------
     # Навигация и компании
     # --------------------------------------------------------------
     def _show_company(self, company_id: uuid.UUID):
@@ -475,7 +529,7 @@ class MainWindow(QMainWindow):
                             nav_panel._load_companies()
                         self._show_company(company.id)
                     except Exception as e:
-                        QMessageBox.critical(self, "Ошибка", f"Не удалось создать компанию:\n{e}")
+                        show_error_message(self, "Ошибка", f"Не удалось создать компанию:\n{e}")
                     finally:
                         session.close()
             else:

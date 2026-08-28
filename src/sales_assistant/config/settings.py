@@ -3,16 +3,14 @@
 Пакет sales_assistant.config.settings.
 
 Управление настройками приложения, хранящимися в data/cache/app_settings.json.
-Настройки не синхронизируются по P2P, локальны для каждого узла.
 """
-
 import json
+import uuid
 from pathlib import Path
 from typing import Any, Dict
 
 from .paths import APP_SETTINGS_FILE, CACHE_DIR
 
-# Значения по умолчанию
 DEFAULTS: Dict[str, Any] = {
     "theme": "classic",
     "language": "ru",
@@ -20,13 +18,13 @@ DEFAULTS: Dict[str, Any] = {
         "deals": False,
     },
     "first_run": True,
+    "checko_api_key": "",
+    "node_id": str(uuid.uuid4()),   # ← единый идентификатор узла
 }
 
 _cache: Dict[str, Any] | None = None
 
-
 def _load() -> Dict[str, Any]:
-    """Загружает настройки из файла, объединяя с DEFAULTS."""
     if not APP_SETTINGS_FILE.exists():
         return DEFAULTS.copy()
     try:
@@ -34,21 +32,16 @@ def _load() -> Dict[str, Any]:
             data = json.load(f)
     except (json.JSONDecodeError, OSError):
         return DEFAULTS.copy()
-    # Слияние: берем DEFAULTS и переопределяем те ключи, что есть в файле
     merged = DEFAULTS.copy()
     merged.update(data)
     return merged
 
-
 def _save(data: Dict[str, Any]) -> None:
-    """Сохраняет настройки в файл."""
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     with open(APP_SETTINGS_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
-
 def get_setting(key: str, default: Any = None) -> Any:
-    """Возвращает значение настройки по ключу (поддерживает вложенные через точку, например 'modules.deals')."""
     global _cache
     if _cache is None:
         _cache = _load()
@@ -63,9 +56,7 @@ def get_setting(key: str, default: Any = None) -> Any:
             return default
     return value
 
-
 def set_setting(key: str, value: Any) -> None:
-    """Устанавливает значение настройки и сохраняет."""
     global _cache
     if _cache is None:
         _cache = _load()
@@ -78,9 +69,15 @@ def set_setting(key: str, value: Any) -> None:
     d[keys[-1]] = value
     _save(_cache)
 
-
 def reset_settings() -> None:
-    """Сбрасывает настройки к значениям по умолчанию."""
     global _cache
     _cache = DEFAULTS.copy()
     _save(_cache)
+
+def get_node_id() -> uuid.UUID:
+    """Возвращает сохранённый идентификатор узла."""
+    node_str = get_setting("node_id")
+    if not node_str:
+        node_str = str(uuid.uuid4())
+        set_setting("node_id", node_str)
+    return uuid.UUID(node_str)

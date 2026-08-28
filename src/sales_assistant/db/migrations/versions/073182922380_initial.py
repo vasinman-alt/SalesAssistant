@@ -1,8 +1,8 @@
 """initial
 
-Revision ID: 39bbed941874
+Revision ID: 073182922380
 Revises: 
-Create Date: 2026-07-24 13:45:58.900036
+Create Date: 2026-07-28 12:07:53.484366
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '39bbed941874'
+revision: str = '073182922380'
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -78,6 +78,7 @@ def upgrade() -> None:
     op.create_table('companies',
     sa.Column('id', sa.Uuid(), nullable=False),
     sa.Column('name', sa.String(), nullable=False),
+    sa.Column('display_name', sa.String(), nullable=True),
     sa.Column('inn', sa.String(), nullable=True),
     sa.Column('region_id', sa.Uuid(), nullable=True),
     sa.Column('legal_address', sa.String(), nullable=True),
@@ -102,6 +103,7 @@ def upgrade() -> None:
     sa.Column('original_name', sa.String(), nullable=False),
     sa.Column('doc_type', sa.String(), nullable=False),
     sa.Column('status', sa.String(), nullable=False),
+    sa.Column('comment', sa.Text(), nullable=True),
     sa.Column('uploaded_at', sa.DateTime(), nullable=False),
     sa.Column('uploaded_by', sa.Uuid(), nullable=False),
     sa.Column('origin_node', sa.Uuid(), nullable=False),
